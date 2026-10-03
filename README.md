@@ -286,9 +286,8 @@ levels, accidental-price fallback, and TP-price selection from tracked state.
 
 ## CI (GitHub Actions)
 
-The org secret **`GRIDCORE_READ_TOKEN`** already exists (visibility: all repos)
-and can read this module. Consuming repos must point Go at it before any
-`go get` / `go build` / `go test`:
+`gridcore` is private, so any workflow that runs `go get` / `go build` /
+`go test` / `go mod download` must authenticate. Add this to the job:
 
 ```yaml
 env:
@@ -307,6 +306,17 @@ steps:
 
   - run: go test ./...
 ```
+
+**Credential:** `GRIDCORE_READ_TOKEN` must be a token with **Contents: read**
+on `gridcore`. Use a dedicated fine-grained PAT (or a GitHub App installation
+token) — do not reuse a broad admin PAT.
+
+**Where to store it:** as a **repository secret** in each consuming repo. An
+organization secret with the same name also exists (visibility `all`), but in
+testing it was **not delivered to a newly created repository** even with
+`selected` visibility and after 20+ minutes, while a repository secret was
+delivered immediately. Prefer the repo secret; use the org secret only if it
+verifiably resolves in that repo.
 
 The `insteadOf` is scoped to `github.com/web3frozen-devops/` on purpose, so the
 token is never sent to other hosts or used for unrelated (public) modules.
@@ -339,16 +349,18 @@ RUN --mount=type=secret,id=gridcore_token \
       secrets: gridcore_token=${{ secrets.GRIDCORE_READ_TOKEN }}
 ```
 
-For a local `docker build`, use `DOCKER_BUILDKIT=1 docker build --secret id=gridcore_token,env=GRIDCORE_READ_TOKEN .`.
+For a local build: `DOCKER_BUILDKIT=1 docker build --secret id=gridcore_token,env=GRIDCORE_READ_TOKEN .`.
 
 The `consumer-smoke` job in `.github/workflows/ci.yml` exercises this exact path
 on every push, so a regression in module fetch fails CI here first.
 
-### Zero-secret alternative
+### Zero-secret alternatives
 
-If you would rather not wire a token at all, make the `gridcore` repo public and
-drop `GOPRIVATE` — public modules need no credentials and the Docker stage needs
-no secret mount. That exposes the strategy code, so it is a deliberate choice.
+- Make this repo **public** — no credentials anywhere, but it exposes the
+  strategy code.
+- Run `go mod vendor` in the consuming repo and commit `vendor/`. Go then builds
+  offline from `vendor/` with no token and no Docker secret; re-run `go mod vendor`
+  on every gridcore upgrade. This duplicates the code at build time.
 
 ## Versioning
 

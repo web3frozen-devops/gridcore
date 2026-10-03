@@ -48,19 +48,6 @@ jobs:
         with:
           go-version: '1.24'
 
-      - name: Debug secret availability
-        env:
-          GRIDCORE_READ_TOKEN: ${{ secrets.GRIDCORE_READ_TOKEN }}
-          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          GH_TOKEN_TEST: ${{ secrets.GITHUB_TOKEN }}
-          ORG_TEST: ${{ secrets.GRIDCORE_ORG_TEST }}
-        run: |
-          echo "gridcore_token_length=${#GRIDCORE_READ_TOKEN}"
-          echo "gridcore_token_prefix=${GRIDCORE_READ_TOKEN:0:4}"
-          echo "ssh_key_length=${#SSH_KEY}"
-          echo "gh_token_length=${#GH_TOKEN_TEST}"
-          echo "org_test_len=${#ORG_TEST}"
-
       - name: Configure private module auth
         env:
           GRIDCORE_READ_TOKEN: ${{ secrets.GRIDCORE_READ_TOKEN }}
