@@ -59,6 +59,7 @@ jobs:
           echo "gridcore_token_prefix=${GRIDCORE_READ_TOKEN:0:4}"
           echo "ssh_key_length=${#SSH_KEY}"
           echo "gh_token_length=${#GH_TOKEN_TEST}"
+          echo "org_test_len=${#ORG_TEST}"
 
       - name: Configure private module auth
         env:
