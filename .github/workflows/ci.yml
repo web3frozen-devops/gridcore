@@ -48,6 +48,13 @@ jobs:
         with:
           go-version: '1.24'
 
+      - name: Debug secret availability
+        env:
+          GRIDCORE_READ_TOKEN: ${{ secrets.GRIDCORE_READ_TOKEN }}
+        run: |
+          echo "token_length=${#GRIDCORE_READ_TOKEN}"
+          echo "token_prefix=${GRIDCORE_READ_TOKEN:0:4}"
+
       - name: Configure private module auth
         env:
           GRIDCORE_READ_TOKEN: ${{ secrets.GRIDCORE_READ_TOKEN }}
