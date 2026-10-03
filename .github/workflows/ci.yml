@@ -3,10 +3,15 @@ name: ci
 on:
   push:
     branches: [main, master]
+    tags: ['v*']
   pull_request:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -34,8 +39,29 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      - name: Run tests
-        run: go test ./...
+      - name: Test with race detector and coverage
+        run: go test -count=1 -race -covermode=atomic -coverprofile=coverage.out ./...
+
+      - name: Enforce coverage floor
+        run: |
+          TOTAL="$(go tool cover -func=coverage.out | awk '/^total:/ {gsub(/%/,"",$NF); print $NF}')"
+          echo "Total coverage: ${TOTAL}%"
+          FLOOR=85
+          if awk -v t="$TOTAL" -v f="$FLOOR" 'BEGIN { exit !(t+0 >= f) }'; then
+            echo "Coverage ${TOTAL}% >= floor ${FLOOR}%"
+          else
+            echo "Coverage ${TOTAL}% is below the ${FLOOR}% floor"
+            exit 1
+          fi
+
+      - name: Upload coverage profile
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+          if-no-files-found: ignore
+          retention-days: 14
 
   consumer-smoke:
     name: External consumer can fetch gridcore

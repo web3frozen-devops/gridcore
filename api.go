@@ -10,6 +10,8 @@ package gridcore
 
 // EncodeBuyClientOrderID returns a client order index carrying the grid level
 // for a BUY order. Successive calls for the same level return distinct ids.
+// Levels must be non-negative; a negative level is clamped to 0. Extremely
+// large levels (beyond the encoder's range) fall back to a level-0 id.
 func EncodeBuyClientOrderID(level int) int64 { return encodeBuyClientOrderID(level) }
 
 // EncodeTPClientOrderID returns a client order index carrying the grid level

@@ -54,8 +54,23 @@ func LoadConfig() (Config, error) {
 		TelegramToken:      strings.TrimSpace(os.Getenv("TELEGRAM_TOKEN")),
 		TelegramChatID:     strings.TrimSpace(os.Getenv("TELEGRAM_CHAT_ID")),
 	}
-	if cfg.Symbol == "" {
-		return Config{}, fmt.Errorf("SYMBOL is required")
+	if cfg.OrderSize <= 0 {
+		return Config{}, fmt.Errorf("ORDER_SIZE must be > 0")
+	}
+	if cfg.NumLevels < 1 {
+		return Config{}, fmt.Errorf("NUM_GRID_LEVELS must be >= 1")
+	}
+	if cfg.GridSpacing <= 0 || cfg.GridSpacing >= 100 {
+		return Config{}, fmt.Errorf("GRID_SPACING_PERCENTAGE must be within (0,100)")
+	}
+	if cfg.ProfitPct <= 0 {
+		return Config{}, fmt.Errorf("PROFIT_PERCENTAGE must be > 0")
+	}
+	if cfg.PollSeconds < 0 {
+		return Config{}, fmt.Errorf("POLL_INTERVAL_SECONDS must be >= 0")
+	}
+	if cfg.MarginSeconds < 0 {
+		return Config{}, fmt.Errorf("MARGIN_CHECK_INTERVAL_SECONDS must be >= 0")
 	}
 	return cfg, nil
 }

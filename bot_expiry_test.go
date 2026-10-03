@@ -27,6 +27,12 @@ type stubExchange struct {
 	accountHits   int
 	activeHits    int
 	ordersByHits  int
+
+	// failure injection
+	ordersByErr   error
+	cancelAllErr  error
+	freeMarginPct float64
+	freeMarginErr error
 }
 
 func (s *stubExchange) Market(ctx context.Context) (MarketMeta, error) { return s.marketResp, nil }
@@ -40,6 +46,9 @@ func (s *stubExchange) ActiveOrders(ctx context.Context) ([]Order, error) {
 }
 func (s *stubExchange) OrdersByClientIndexes(ctx context.Context, clientIDs []int64) ([]Order, error) {
 	s.ordersByHits++
+	if s.ordersByErr != nil {
+		return nil, s.ordersByErr
+	}
 	var out []Order
 	for _, id := range clientIDs {
 		if ord, ok := s.ordersBy[id]; ok {
@@ -50,9 +59,11 @@ func (s *stubExchange) OrdersByClientIndexes(ctx context.Context, clientIDs []in
 }
 func (s *stubExchange) CancelAll(ctx context.Context) error {
 	s.cancelAllHits++
-	return nil
+	return s.cancelAllErr
 }
-func (s *stubExchange) FreeMarginPct(ctx context.Context) (float64, error) { return 0, nil }
+func (s *stubExchange) FreeMarginPct(ctx context.Context) (float64, error) {
+	return s.freeMarginPct, s.freeMarginErr
+}
 
 func (s *stubExchange) PlaceLimitOrder(ctx context.Context, side string, level GridLevel, sizeAtomic int64, priceDecimals uint8, reduceOnly bool) (SendTxResponse, int64, error) {
 	if side == "buy" && s.failBuyAfter > 0 && countSide(s.placed, "buy") >= s.failBuyAfter {

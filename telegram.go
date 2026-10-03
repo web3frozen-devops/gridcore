@@ -9,17 +9,22 @@ import (
 	"time"
 )
 
+// defaultTelegramAPI is the Telegram Bot API base URL.
+const defaultTelegramAPI = "https://api.telegram.org"
+
 type Telegram struct {
 	token  string
 	chatID string
-	http   *http.Client
+	// apiBase overrides the Telegram API base URL (used in tests).
+	apiBase string
+	http    *http.Client
 }
 
 func NewTelegram(token, chatID string, timeout time.Duration) *Telegram {
 	if token == "" || chatID == "" {
 		return nil
 	}
-	return &Telegram{token: token, chatID: chatID, http: &http.Client{Timeout: timeout}}
+	return &Telegram{token: token, chatID: chatID, apiBase: defaultTelegramAPI, http: &http.Client{Timeout: timeout}}
 }
 
 func (t *Telegram) Send(ctx context.Context, text string) error {
@@ -29,12 +34,20 @@ func (t *Telegram) Send(ctx context.Context, text string) error {
 	form := url.Values{}
 	form.Set("chat_id", t.chatID)
 	form.Set("text", text)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.telegram.org/bot"+t.token+"/sendMessage", strings.NewReader(form.Encode()))
+	base := t.apiBase
+	if base == "" {
+		base = defaultTelegramAPI
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/bot"+t.token+"/sendMessage", strings.NewReader(form.Encode()))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := t.http.Do(req)
+	client := t.http
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}

@@ -75,6 +75,12 @@ func encodeClientOrderID(base int64, level int) int64 {
 	if level < 0 {
 		level = 0
 	}
+	// Enforce the shared encodable bound so both the buy and TP ranges decode
+	// back to exactly the requested level. Levels above the bound fall back to
+	// level 0 instead of silently overlapping or overflowing the index space.
+	if level > maxClientOrderLevel {
+		level = 0
+	}
 	id := base + int64(level)*clientOrderLevelRange + nextClientOrderSuffix()
 	if id > maxClientOrderIndex {
 		return base + nextClientOrderSuffix()
@@ -210,3 +216,14 @@ func sortGridByLevel(grid []GridLevel) {
 func describePrice(price float64) string {
 	return fmt.Sprintf("%.8f", price)
 }
+
+// maxClientOrderLevel is the largest grid level the client order index encoding
+// can carry for either side. It is bounded by the tighter of the buy and TP id
+// ranges, with one full level range reserved for the random per-call suffix so
+// an encoded id can never spill past maxClientOrderIndex or cross into the other
+// side's range. Levels above this fall back to a level-0 index (see
+// encodeClientOrderID).
+//
+// Buy capacity: (tpClientOrderBase-buyClientOrderBase)/clientOrderLevelRange - 1 = 99_999
+// TP  capacity: (maxClientOrderIndex-tpClientOrderBase-clientOrderLevelRange+1)/clientOrderLevelRange = 81_473
+const maxClientOrderLevel = int((maxClientOrderIndex - tpClientOrderBase - clientOrderLevelRange) / clientOrderLevelRange)

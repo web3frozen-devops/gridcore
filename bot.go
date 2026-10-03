@@ -28,6 +28,27 @@ type Bot struct {
 	wsConnected         bool
 	pollCooldownUntil   time.Time
 	nextCoveragePlaceAt time.Time
+
+	// Optional overrides for the reconcile/margin loop intervals. Zero means
+	// use the configured values.
+	pollEvery   time.Duration
+	marginEvery time.Duration
+}
+
+// pollInterval is how often the engine reconciles tracked orders by REST.
+func (b *Bot) pollInterval() time.Duration {
+	if b.pollEvery > 0 {
+		return b.pollEvery
+	}
+	return time.Duration(max(2, b.cfg.PollSeconds)) * time.Second
+}
+
+// marginInterval is how often the engine checks free margin.
+func (b *Bot) marginInterval() time.Duration {
+	if b.marginEvery > 0 {
+		return b.marginEvery
+	}
+	return time.Duration(max(5, b.cfg.MarginSeconds)) * time.Second
 }
 
 const (
@@ -75,8 +96,8 @@ func (b *Bot) Run(ctx context.Context) error {
 		return err
 	}
 
-	pollTicker := time.NewTicker(time.Duration(max(2, b.cfg.PollSeconds)) * time.Second)
-	marginTicker := time.NewTicker(time.Duration(max(5, b.cfg.MarginSeconds)) * time.Second)
+	pollTicker := time.NewTicker(b.pollInterval())
+	marginTicker := time.NewTicker(b.marginInterval())
 	defer pollTicker.Stop()
 	defer marginTicker.Stop()
 
@@ -471,7 +492,7 @@ func (b *Bot) setPollCooldown(err error) {
 	if err == nil {
 		return
 	}
-	delay := time.Duration(max(2, b.cfg.PollSeconds)) * time.Second
+	delay := b.pollInterval()
 	if delay < 5*time.Second {
 		delay = 5 * time.Second
 	}

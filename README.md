@@ -24,8 +24,8 @@ implemented and tested here. Your job is a thin adapter:
 2. Optionally implement `gridcore.Streamer` for WebSocket account updates.
 3. Write `cmd/<dex>/main.go` that loads config and calls
    `gridcore.New(...).Run(ctx)`.
-4. Make `go test ./...` pass. The 31 tests in this module are the conformance
-   suite. Do not copy strategy code into the adapter to make them pass.
+4. Make `go test ./...` pass. The conformance suite in this module (90 tests)
+   is the contract. Do not copy strategy code into the adapter to make them pass.
 
 If you find yourself editing grid math, the recovery ladder, coverage
 accounting or the fill state machine, **stop** — you are on the wrong path.
@@ -207,7 +207,7 @@ the built-in Lighter heuristic. Without it, the Lighter heuristic
    ```
 
 7. **Verify.** From the venue module: `go build ./... && go test ./...`. From
-   this module: `go test ./...` (31 tests). Never weaken or delete the conformance
+   this module: `go test ./...` (90 tests). Never weaken or delete the conformance
    tests.
 
 ---
@@ -272,7 +272,7 @@ go get github.com/web3frozen-devops/gridcore@latest
 
 ## Tests
 
-The suite (31 tests) was copied from `rh-lighter-trade` unchanged (minus
+The suite (90 tests) was copied from `rh-lighter-trade` unchanged (minus
 venue-specific config-field assertions) and pins: expiry replacement, startup
 recovery, post-only-safe ladders, in-flight/coverage accounting, overflow
 levels, accidental-price fallback, and TP-price selection from tracked state.
@@ -289,6 +289,25 @@ steps:
     with: { go-version-file: go.mod, cache: true }
   - run: go test ./...
 ```
+
+### What CI runs
+
+All workflows use GitHub-provided actions and the official Go toolchain:
+
+- `ci.yml` — `gofmt` gate, `go vet`, then `go test -race -covermode=atomic`
+  with an **85% coverage floor** (currently ~90%). The profile is uploaded with
+  official `actions/upload-artifact`. A second job (`consumer-smoke`) fetches
+  this module as an external consumer, credential-free, to prove it is
+  importable from a fresh project.
+- `codeql.yml` — GitHub CodeQL Go analysis (`security-and-quality` query pack)
+  on push, PR and weekly, uploading SARIF to GitHub code scanning.
+- `security.yml` — `govulncheck` against the Go vulnerability database
+  (push, PR, weekly) plus `actions/dependency-review-action` on PRs.
+- `dependabot.yml` — weekly Go module and GitHub Actions update PRs.
+
+Repo-level GitHub security features are enabled: CodeQL code scanning, Dependabot
+vulnerability alerts and security updates, secret scanning, secret scanning push
+protection, and private vulnerability reporting. See `.github/SECURITY.md`.
 
 Docker builds need no token either:
 
