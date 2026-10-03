@@ -25,3 +25,11 @@ This repository runs GitHub's security tooling on every push and pull request:
 - **Secret scanning + push protection** — blocks committing credentials
 
 No credentials are stored in this repository or required to build it.
+
+## Branch protection
+
+The `master` branch is protected: force pushes and branch deletion are blocked
+for everyone, and pull requests must pass the required CI checks
+(`Build and test gridcore`, `External consumer can fetch gridcore`,
+`Analyze (Go)`, `govulncheck`, `Dependency review`) before they can merge.
+

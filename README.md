@@ -307,7 +307,8 @@ All workflows use GitHub-provided actions and the official Go toolchain:
 
 Repo-level GitHub security features are enabled: CodeQL code scanning, Dependabot
 vulnerability alerts and security updates, secret scanning, secret scanning push
-protection, and private vulnerability reporting. See `.github/SECURITY.md`.
+protection, private vulnerability reporting, and protected `master`
+(required CI checks, no force pushes or deletions). See `.github/SECURITY.md`.
 
 Docker builds need no token either:
 
