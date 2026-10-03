@@ -41,18 +41,15 @@ jobs:
     name: External consumer can fetch gridcore
     runs-on: ubuntu-latest
     env:
-      GOPRIVATE: github.com/web3frozen-devops/*
+      GOFLAGS: -mod=mod
+      # The module may not be indexed by the checksum DB yet right after a push;
+      # fetching directly over HTTPS needs no credentials because the repo is public.
+      GOSUMDB: 'off'
     steps:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
-
-      - name: Configure private module auth
-        env:
-          GRIDCORE_READ_TOKEN: ${{ secrets.GRIDCORE_READ_TOKEN }}
-        run: |
-          git config --global url."https://x-access-token:${GRIDCORE_READ_TOKEN}@github.com/web3frozen-devops/".insteadOf "https://github.com/web3frozen-devops/"
 
       - name: Fetch and run gridcore as an external module
         env:

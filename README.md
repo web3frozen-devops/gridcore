@@ -262,20 +262,13 @@ func (e *Exchange) PlaceLimitOrder(ctx context.Context, side string, lvl gridcor
 - **Mutable state shared with the engine.** `Venue` methods are called from two
   goroutines; guard your own state.
 
-## Consuming this private module
+## Consuming this module
 
-`gridcore` is a private repo, so Go must bypass the public proxy and use your
-GitHub credentials:
+This module is public, so no credentials are needed:
 
 ```bash
-export GOPRIVATE='github.com/web3frozen-devops/*'
-go get github.com/web3frozen-devops/gridcore@v0.1.0
+go get github.com/web3frozen-devops/gridcore@latest
 ```
-
-Locally this works through the git credential store (`~/.git-credentials`). In
-CI, provide a token with read access to the repo (e.g. via
-`git config --global url."https://x-access-token:$TOKEN@github.com/".insteadOf
-"https://github.com/"`).
 
 ## Tests
 
@@ -286,81 +279,32 @@ levels, accidental-price fallback, and TP-price selection from tracked state.
 
 ## CI (GitHub Actions)
 
-`gridcore` is private, so any workflow that runs `go get` / `go build` /
-`go test` / `go mod download` must authenticate. Add this to the job:
+Public module — no secrets, no `GOPRIVATE`, no git auth. A standard Go job just
+works:
 
 ```yaml
-env:
-  GOPRIVATE: github.com/web3frozen-devops/*
-
 steps:
   - uses: actions/checkout@v4
   - uses: actions/setup-go@v5
     with: { go-version-file: go.mod, cache: true }
-
-  - name: Configure gridcore module auth
-    env:
-      GRIDCORE_READ_TOKEN: ${{ secrets.GRIDCORE_READ_TOKEN }}
-    run: |
-      git config --global url."https://x-access-token:${GRIDCORE_READ_TOKEN}@github.com/web3frozen-devops/".insteadOf "https://github.com/web3frozen-devops/"
-
   - run: go test ./...
 ```
 
-**Credential:** `GRIDCORE_READ_TOKEN` must be a token with **Contents: read**
-on `gridcore`. Use a dedicated fine-grained PAT (or a GitHub App installation
-token) — do not reuse a broad admin PAT.
-
-**Where to store it:** as a **repository secret** in each consuming repo. An
-organization secret with the same name also exists (visibility `all`), but in
-testing it was **not delivered to a newly created repository** even with
-`selected` visibility and after 20+ minutes, while a repository secret was
-delivered immediately. Prefer the repo secret; use the org secret only if it
-verifiably resolves in that repo.
-
-The `insteadOf` is scoped to `github.com/web3frozen-devops/` on purpose, so the
-token is never sent to other hosts or used for unrelated (public) modules.
-
-### Docker builds
-
-The Dockerfile builder stage runs `go mod download`, so it needs the token too.
-Use a BuildKit secret so it never lands in an image layer:
+Docker builds need no token either:
 
 ```dockerfile
-# syntax=docker/dockerfile:1
 FROM golang:1.24-alpine AS builder
 RUN apk add --no-cache git ca-certificates
 WORKDIR /build
-ENV GOPRIVATE=github.com/web3frozen-devops/*
 COPY go.mod go.sum ./
-RUN --mount=type=secret,id=gridcore_token \
-    git config --global url."https://x-access-token:$(cat /run/secrets/gridcore_token)@github.com/web3frozen-devops/".insteadOf "https://github.com/web3frozen-devops/" && \
-    go mod download
+RUN go mod download
 COPY . .
-RUN --mount=type=secret,id=gridcore_token \
-    git config --global url."https://x-access-token:$(cat /run/secrets/gridcore_token)@github.com/web3frozen-devops/".insteadOf "https://github.com/web3frozen-devops/" && \
-    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gridbot ./cmd/gridbot
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gridbot ./cmd/gridbot
 ```
 
-```yaml
-  - uses: docker/build-push-action@v6
-    with:
-      context: .
-      secrets: gridcore_token=${{ secrets.GRIDCORE_READ_TOKEN }}
-```
-
-For a local build: `DOCKER_BUILDKIT=1 docker build --secret id=gridcore_token,env=GRIDCORE_READ_TOKEN .`.
-
-The `consumer-smoke` job in `.github/workflows/ci.yml` exercises this exact path
-on every push, so a regression in module fetch fails CI here first.
-
-### Zero-secret alternatives
-
-- Make this repo **public** — no credentials anywhere, but it exposes the
-  strategy code.
-- Run `go mod vendor` in the consuming repo and commit `vendor/`. Go then builds
-  offline from `vendor/` with no token and no Docker secret; re-run `go mod vendor`
-  on every gridcore upgrade. This duplicates the code at build time.
+`.github/workflows/ci.yml` includes a `consumer-smoke` job that fetches this
+module from a clean directory on every push, so module-fetch regressions fail CI
+here first.
 
 ## Versioning
 
