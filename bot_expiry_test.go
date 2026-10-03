@@ -29,20 +29,25 @@ type stubExchange struct {
 	ordersByHits  int
 
 	// failure injection
+	marketErr     error
+	accountErr    error
+	activeErr     error
 	ordersByErr   error
 	cancelAllErr  error
 	freeMarginPct float64
 	freeMarginErr error
 }
 
-func (s *stubExchange) Market(ctx context.Context) (MarketMeta, error) { return s.marketResp, nil }
+func (s *stubExchange) Market(ctx context.Context) (MarketMeta, error) {
+	return s.marketResp, s.marketErr
+}
 func (s *stubExchange) Account(ctx context.Context) (AccountResponse, error) {
 	s.accountHits++
-	return s.accountResp, nil
+	return s.accountResp, s.accountErr
 }
 func (s *stubExchange) ActiveOrders(ctx context.Context) ([]Order, error) {
 	s.activeHits++
-	return s.activeOrders, nil
+	return s.activeOrders, s.activeErr
 }
 func (s *stubExchange) OrdersByClientIndexes(ctx context.Context, clientIDs []int64) ([]Order, error) {
 	s.ordersByHits++

@@ -46,7 +46,7 @@ jobs:
         run: |
           TOTAL="$(go tool cover -func=coverage.out | awk '/^total:/ {gsub(/%/,"",$NF); print $NF}')"
           echo "Total coverage: ${TOTAL}%"
-          FLOOR=85
+          FLOOR=100
           if awk -v t="$TOTAL" -v f="$FLOOR" 'BEGIN { exit !(t+0 >= f) }'; then
             echo "Coverage ${TOTAL}% >= floor ${FLOOR}%"
           else

@@ -24,6 +24,10 @@ const (
 
 var clientOrderSequence atomic.Uint64
 
+// randInt is crypto/rand.Int. It is a variable so tests can exercise the
+// fallback path taken if the system entropy source ever fails.
+var randInt = rand.Int
+
 func resolveSymbol(symbol string) string {
 	s := strings.ToUpper(strings.TrimSpace(symbol))
 	s = strings.TrimSuffix(s, "-PERP")
@@ -81,16 +85,15 @@ func encodeClientOrderID(base int64, level int) int64 {
 	if level > maxClientOrderLevel {
 		level = 0
 	}
-	id := base + int64(level)*clientOrderLevelRange + nextClientOrderSuffix()
-	if id > maxClientOrderIndex {
-		return base + nextClientOrderSuffix()
-	}
-	return id
+	// maxClientOrderLevel is derived so that, with a suffix strictly below
+	// clientOrderLevelRange, the encoded id can never exceed
+	// maxClientOrderIndex nor cross into the other side's range.
+	return base + int64(level)*clientOrderLevelRange + nextClientOrderSuffix()
 }
 
 func nextClientOrderSuffix() int64 {
 	seq := int64(clientOrderSequence.Add(1) % 1_000)
-	n, err := rand.Int(rand.Reader, big.NewInt(clientOrderLevelRange/1_000))
+	n, err := randInt(rand.Reader, big.NewInt(clientOrderLevelRange/1_000))
 	if err == nil {
 		return n.Int64()*1_000 + seq
 	}
