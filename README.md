@@ -329,3 +329,8 @@ here first.
 
 Semver tags (`v0.1.0`, …). Adapters pin a tag. Breaking changes to `Venue` or
 the canonical rules bump the major version.
+
+## License
+
+MIT — see [LICENSE](LICENSE). The module is public and has no third-party
+dependencies.
