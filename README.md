@@ -284,6 +284,72 @@ venue-specific config-field assertions) and pins: expiry replacement, startup
 recovery, post-only-safe ladders, in-flight/coverage accounting, overflow
 levels, accidental-price fallback, and TP-price selection from tracked state.
 
+## CI (GitHub Actions)
+
+The org secret **`GRIDCORE_READ_TOKEN`** already exists (visibility: all repos)
+and can read this module. Consuming repos must point Go at it before any
+`go get` / `go build` / `go test`:
+
+```yaml
+env:
+  GOPRIVATE: github.com/web3frozen-devops/*
+
+steps:
+  - uses: actions/checkout@v4
+  - uses: actions/setup-go@v5
+    with: { go-version-file: go.mod, cache: true }
+
+  - name: Configure gridcore module auth
+    env:
+      GRIDCORE_READ_TOKEN: ${{ secrets.GRIDCORE_READ_TOKEN }}
+    run: |
+      git config --global url."https://x-access-token:${GRIDCORE_READ_TOKEN}@github.com/web3frozen-devops/".insteadOf "https://github.com/web3frozen-devops/"
+
+  - run: go test ./...
+```
+
+The `insteadOf` is scoped to `github.com/web3frozen-devops/` on purpose, so the
+token is never sent to other hosts or used for unrelated (public) modules.
+
+### Docker builds
+
+The Dockerfile builder stage runs `go mod download`, so it needs the token too.
+Use a BuildKit secret so it never lands in an image layer:
+
+```dockerfile
+# syntax=docker/dockerfile:1
+FROM golang:1.24-alpine AS builder
+RUN apk add --no-cache git ca-certificates
+WORKDIR /build
+ENV GOPRIVATE=github.com/web3frozen-devops/*
+COPY go.mod go.sum ./
+RUN --mount=type=secret,id=gridcore_token \
+    git config --global url."https://x-access-token:$(cat /run/secrets/gridcore_token)@github.com/web3frozen-devops/".insteadOf "https://github.com/web3frozen-devops/" && \
+    go mod download
+COPY . .
+RUN --mount=type=secret,id=gridcore_token \
+    git config --global url."https://x-access-token:$(cat /run/secrets/gridcore_token)@github.com/web3frozen-devops/".insteadOf "https://github.com/web3frozen-devops/" && \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gridbot ./cmd/gridbot
+```
+
+```yaml
+  - uses: docker/build-push-action@v6
+    with:
+      context: .
+      secrets: gridcore_token=${{ secrets.GRIDCORE_READ_TOKEN }}
+```
+
+For a local `docker build`, use `DOCKER_BUILDKIT=1 docker build --secret id=gridcore_token,env=GRIDCORE_READ_TOKEN .`.
+
+The `consumer-smoke` job in `.github/workflows/ci.yml` exercises this exact path
+on every push, so a regression in module fetch fails CI here first.
+
+### Zero-secret alternative
+
+If you would rather not wire a token at all, make the `gridcore` repo public and
+drop `GOPRIVATE` — public modules need no credentials and the Docker stage needs
+no secret mount. That exposes the strategy code, so it is a deliberate choice.
+
 ## Versioning
 
 Semver tags (`v0.1.0`, …). Adapters pin a tag. Breaking changes to `Venue` or

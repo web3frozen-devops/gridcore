@@ -1,0 +1,80 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and test gridcore
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify formatting
+        run: |
+          UNFORMATTED="$(gofmt -l .)"
+          if [ -n "$UNFORMATTED" ]; then
+            echo "These files need gofmt:"
+            echo "$UNFORMATTED"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Run tests
+        run: go test ./...
+
+  consumer-smoke:
+    name: External consumer can fetch gridcore
+    runs-on: ubuntu-latest
+    env:
+      GOPRIVATE: github.com/web3frozen-devops/*
+    steps:
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Configure private module auth
+        env:
+          GRIDCORE_READ_TOKEN: ${{ secrets.GRIDCORE_READ_TOKEN }}
+        run: |
+          git config --global url."https://x-access-token:${GRIDCORE_READ_TOKEN}@github.com/web3frozen-devops/".insteadOf "https://github.com/web3frozen-devops/"
+
+      - name: Fetch and run gridcore as an external module
+        env:
+          REF: ${{ github.sha }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/consumer"
+          cd "$RUNNER_TEMP/consumer"
+          go mod init smoke
+          go get "github.com/web3frozen-devops/gridcore@${REF}"
+          cat > main.go <<'GO'
+          package main
+
+          import (
+          	"fmt"
+
+          	"github.com/web3frozen-devops/gridcore"
+          )
+
+          func main() {
+          	id := gridcore.EncodeBuyClientOrderID(3)
+          	level, side, ok := gridcore.DecodeClientOrderID(id)
+          	fmt.Println(level, side, ok, gridcore.RoundPrice(99804.9, 2))
+          }
+          GO
+          go run .
