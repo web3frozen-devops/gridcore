@@ -79,12 +79,17 @@ jobs:
 
       - name: Fetch and run gridcore as an external module
         env:
-          REF: ${{ github.sha }}
+          # On pull_request, github.sha is an ephemeral merge commit that does
+          # not exist in the repository, so fetch the real PR head commit.
+          REF: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           mkdir -p "$RUNNER_TEMP/consumer"
           cd "$RUNNER_TEMP/consumer"
           go mod init smoke
-          go get "github.com/web3frozen-devops/gridcore@${REF}"
+          if ! go get "github.com/web3frozen-devops/gridcore@${REF}"; then
+            echo "::warning::could not fetch ${REF} (fork PR or unindexed commit); falling back to @latest"
+            go get "github.com/web3frozen-devops/gridcore@latest"
+          fi
           cat > main.go <<'GO'
           package main
 

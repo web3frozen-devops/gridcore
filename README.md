@@ -270,6 +270,14 @@ This module is public, so no credentials are needed:
 go get github.com/web3frozen-devops/gridcore@latest
 ```
 
+## Development
+
+```bash
+gofmt -l .                              # must be empty
+go vet ./...
+go test -race -covermode=atomic ./...   # CI gate; coverage floor is 85%
+```
+
 ## Tests
 
 The suite (90 tests) was copied from `rh-lighter-trade` unchanged (minus
@@ -284,8 +292,8 @@ works:
 
 ```yaml
 steps:
-  - uses: actions/checkout@v4
-  - uses: actions/setup-go@v5
+  - uses: actions/checkout@v7
+  - uses: actions/setup-go@v7
     with: { go-version-file: go.mod, cache: true }
   - run: go test ./...
 ```
@@ -302,7 +310,9 @@ All workflows use GitHub-provided actions and the official Go toolchain:
 - `codeql.yml` — GitHub CodeQL Go analysis (`security-and-quality` query pack)
   on push, PR and weekly, uploading SARIF to GitHub code scanning.
 - `security.yml` — `govulncheck` against the Go vulnerability database
-  (push, PR, weekly) plus `actions/dependency-review-action` on PRs.
+  (push, PR, weekly). Dependency review is intentionally omitted: it needs the
+  repository Dependency Graph, which is unavailable here, and the module has no
+  third-party dependencies.
 - `dependabot.yml` — weekly Go module and GitHub Actions update PRs.
 
 Repo-level GitHub security features are enabled: CodeQL code scanning, Dependabot

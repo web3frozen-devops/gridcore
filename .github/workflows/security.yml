@@ -11,6 +11,11 @@ on:
 permissions:
   contents: read
 
+# NOTE: GitHub's dependency-review action is intentionally not configured. It
+# requires the repository Dependency Graph, which is not available here (the
+# SBOM API returns 404 for this repo and its siblings). This module also has
+# zero third-party dependencies, so Dependabot and govulncheck cover the risk.
+
 jobs:
   govulncheck:
     name: govulncheck
@@ -24,19 +29,3 @@ jobs:
         with:
           go-version-file: go.mod
           go-package: ./...
-
-  dependency-review:
-    name: Dependency review
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Dependency review
-        uses: actions/dependency-review-action@v5
-        with:
-          fail-on-severity: moderate
