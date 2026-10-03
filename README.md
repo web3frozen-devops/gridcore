@@ -270,6 +270,14 @@ This module is public, so no credentials are needed:
 go get github.com/web3frozen-devops/gridcore@latest
 ```
 
+## Development
+
+```bash
+gofmt -l .                              # must be empty
+go vet ./...
+go test -race -covermode=atomic ./...   # CI gate; coverage floor is 85%
+```
+
 ## Tests
 
 The suite (90 tests) was copied from `rh-lighter-trade` unchanged (minus
