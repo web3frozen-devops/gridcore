@@ -1,15 +1,15 @@
 # gridcore
 
-Venue-agnostic, long-only grid strategy engine shared by the `*-trade`
-perpetual DEX bots.
+Venue-agnostic, long-only grid strategy engine for perpetual DEX/CEX grid bots.
 
-**Provenance:** extracted verbatim from `rh-lighter-trade`, the implementation
-with no known bugs. `rh-lighter-trade` is the **single source of truth** for the
-trading logic. If this package and any bot disagree, this package is right — fix
-the bot, never fork the engine.
+This package is the **single source of truth** for the grid logic: grid math,
+the fill → TP → re-arm state machine, startup recovery, TP coverage repair,
+order-expiry handling, and the client-order-id scheme. If a venue adapter and
+this package disagree, this package is right — fix the adapter, never fork the
+engine.
 
 The package is pure Go stdlib (zero third-party dependencies) and is safe to
-import from any venue module without pulling in another DEX's SDK.
+import from any venue module without pulling in another exchange's SDK.
 
 ---
 
@@ -24,7 +24,7 @@ implemented and tested here. Your job is a thin adapter:
 2. Optionally implement `gridcore.Streamer` for WebSocket account updates.
 3. Write `cmd/<dex>/main.go` that loads config and calls
    `gridcore.New(...).Run(ctx)`.
-4. Make `go test ./...` pass. The conformance suite in this module (90 tests)
+4. Make `go test ./...` pass. The conformance suite in this module (117 tests)
    is the contract. Do not copy strategy code into the adapter to make them pass.
 
 If you find yourself editing grid math, the recovery ladder, coverage
@@ -121,8 +121,9 @@ type PriceBandClassifier interface{ IsPriceBandError(err error) bool }
 ```
 
 The engine then retries the TP with a band-safe fallback price instead of using
-the built-in Lighter heuristic. Without it, the Lighter heuristic
-(`"accidental price"` / code `21733`) is used, which simply never matches.
+the built-in heuristic. Without it, the built-in heuristic matches an
+`"accidental price"` message or error code `21733`, and simply never matches for
+venues that use neither.
 
 ---
 
@@ -207,7 +208,7 @@ the built-in Lighter heuristic. Without it, the Lighter heuristic
    ```
 
 7. **Verify.** From the venue module: `go build ./... && go test ./...`. From
-   this module: `go test ./...` (90 tests). Never weaken or delete the conformance
+   this module: `go test ./...` (117 tests). Never weaken or delete the conformance
    tests.
 
 ---
@@ -275,15 +276,14 @@ go get github.com/web3frozen-devops/gridcore@latest
 ```bash
 gofmt -l .                              # must be empty
 go vet ./...
-go test -race -covermode=atomic ./...   # CI gate; coverage floor is 85%
+go test -race -covermode=atomic ./...   # CI gate; coverage floor is 100%
 ```
 
 ## Tests
 
-The suite (90 tests) was copied from `rh-lighter-trade` unchanged (minus
-venue-specific config-field assertions) and pins: expiry replacement, startup
-recovery, post-only-safe ladders, in-flight/coverage accounting, overflow
-levels, accidental-price fallback, and TP-price selection from tracked state.
+The suite (117 tests) pins: expiry replacement, startup recovery,
+post-only-safe ladders, in-flight/coverage accounting, overflow levels,
+accidental-price fallback, and TP-price selection from tracked state.
 
 ## CI (GitHub Actions)
 
@@ -303,8 +303,8 @@ steps:
 All workflows use GitHub-provided actions and the official Go toolchain:
 
 - `ci.yml` — `gofmt` gate, `go vet`, then `go test -race -covermode=atomic`
-  with an **85% coverage floor** (currently ~90%). The profile is uploaded with
-  official `actions/upload-artifact`. A second job (`consumer-smoke`) fetches
+  with a **100% statement-coverage floor** (every function is covered). The
+  profile is uploaded with official `actions/upload-artifact`. A second job (`consumer-smoke`) fetches
   this module as an external consumer, credential-free, to prove it is
   importable from a fresh project.
 - `codeql.yml` — GitHub CodeQL Go analysis (`security-and-quality` query pack)

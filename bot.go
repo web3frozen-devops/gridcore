@@ -820,6 +820,9 @@ func chunkClientOrderIDs(ids []int64, size int) [][]int64 {
 	if size <= 0 {
 		size = len(ids)
 	}
+	if size <= 0 {
+		return nil
+	}
 	out := make([][]int64, 0, (len(ids)+size-1)/size)
 	for start := 0; start < len(ids); start += size {
 		end := start + size
