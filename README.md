@@ -262,6 +262,21 @@ func (e *Exchange) PlaceLimitOrder(ctx context.Context, side string, lvl gridcor
 - **Mutable state shared with the engine.** `Venue` methods are called from two
   goroutines; guard your own state.
 
+## Consuming this private module
+
+`gridcore` is a private repo, so Go must bypass the public proxy and use your
+GitHub credentials:
+
+```bash
+export GOPRIVATE='github.com/web3frozen-devops/*'
+go get github.com/web3frozen-devops/gridcore@v0.1.0
+```
+
+Locally this works through the git credential store (`~/.git-credentials`). In
+CI, provide a token with read access to the repo (e.g. via
+`git config --global url."https://x-access-token:$TOKEN@github.com/".insteadOf
+"https://github.com/"`).
+
 ## Tests
 
 The suite (31 tests) was copied from `rh-lighter-trade` unchanged (minus
