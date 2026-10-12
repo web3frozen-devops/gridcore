@@ -17,17 +17,18 @@ type Bot struct {
 	ws       Streamer
 	telegram *Telegram
 
-	mu                  sync.Mutex
-	accountIndex        int64
-	market              MarketMeta
-	grid                []GridLevel
-	tracked             map[int64]*TrackedOrder
-	seenTrades          map[int64]struct{}
-	freeMarginWarned    bool
-	shuttingDown        bool
-	wsConnected         bool
-	pollCooldownUntil   time.Time
-	nextCoveragePlaceAt time.Time
+	mu                    sync.Mutex
+	accountIndex          int64
+	market                MarketMeta
+	grid                  []GridLevel
+	tracked               map[int64]*TrackedOrder
+	seenTrades            map[int64]struct{}
+	freeMarginWarned      bool
+	shuttingDown          bool
+	wsConnected           bool
+	pollCooldownUntil     time.Time
+	nextCoveragePlaceAt   time.Time
+	nextSafetyReconcileAt time.Time
 
 	// Optional overrides for the reconcile/margin loop intervals. Zero means
 	// use the configured values.
@@ -52,8 +53,9 @@ func (b *Bot) marginInterval() time.Duration {
 }
 
 const (
-	inFlightTPWindow      = 90 * time.Second
-	coveragePlaceCooldown = 60 * time.Second
+	inFlightTPWindow          = 90 * time.Second
+	coveragePlaceCooldown     = 60 * time.Second
+	wsSafetyReconcileInterval = 30 * time.Second
 )
 
 type trackedOrderSnapshot struct {
@@ -368,20 +370,30 @@ func (b *Bot) onWSUpdate(update AccountMarketUpdate) {
 		if _, seen := b.seenTrades[t.TradeID]; seen {
 			continue
 		}
-		b.seenTrades[t.TradeID] = struct{}{}
-		if t.BidAccountID == b.accountIndex || t.AskAccountID == b.accountIndex {
-			b.handleTrade(context.Background(), t)
+		if t.BidAccountID != b.accountIndex && t.AskAccountID != b.accountIndex {
+			continue
 		}
+		if err := b.handleTrade(context.Background(), t); err != nil {
+			// Leave the trade unmarked so the polling safety net can retry it
+			// instead of permanently losing the fill.
+			continue
+		}
+		b.seenTrades[t.TradeID] = struct{}{}
 	}
 }
 
 func (b *Bot) setWSConnected(connected bool) {
 	b.mu.Lock()
+	if connected && !b.wsConnected {
+		// Force a full reconcile on the next poll tick after a (re)connect so
+		// fills that happened while the socket was down cannot leave a hole.
+		b.nextSafetyReconcileAt = time.Time{}
+	}
 	b.wsConnected = connected
 	b.mu.Unlock()
 }
 
-func (b *Bot) handleTrade(ctx context.Context, trade Trade) {
+func (b *Bot) handleTrade(ctx context.Context, trade Trade) error {
 	var ids []int64
 	if trade.AskClientID > 0 {
 		ids = append(ids, trade.AskClientID)
@@ -397,13 +409,14 @@ func (b *Bot) handleTrade(ctx context.Context, trade Trade) {
 			args = append(args, "price", price)
 		}
 		b.logger.Error("order lookup failed", args...)
-		return
+		return err
 	}
 	for _, ord := range orders {
 		if ord.Status == "filled" {
 			b.reconcileFilledOrder(ctx, ord)
 		}
 	}
+	return nil
 }
 
 func (b *Bot) reconcileFilledOrder(ctx context.Context, ord Order) {
@@ -412,16 +425,6 @@ func (b *Bot) reconcileFilledOrder(ctx context.Context, ord Order) {
 		return
 	}
 	if snap.LevelIndex < 0 {
-		b.releaseTrackedOrder(ord.ClientOrderIndex, false)
-		b.logger.Error("tracked order level is outside grid", "price", snap.BuyPrice, "client_order_index", ord.ClientOrderIndex, "level", snap.LevelIndex)
-		return
-	}
-	if ord.IsAsk && snap.LevelIndex >= len(b.grid) {
-		b.logger.Info("TP sell filled for recovered overflow unit", "price", snap.TPPrice, "client_order_index", ord.ClientOrderIndex, "level", snap.LevelIndex)
-		b.releaseTrackedOrder(ord.ClientOrderIndex, true)
-		return
-	}
-	if snap.LevelIndex >= len(b.grid) {
 		b.releaseTrackedOrder(ord.ClientOrderIndex, false)
 		b.logger.Error("tracked order level is outside grid", "price", snap.BuyPrice, "client_order_index", ord.ClientOrderIndex, "level", snap.LevelIndex)
 		return
@@ -436,7 +439,7 @@ func (b *Bot) reconcileFilledOrder(ctx context.Context, ord Order) {
 			b.logger.Error("restore buy failed", "price", snap.BuyPrice, "error", err)
 			return
 		}
-		b.logger.Info("TP sell filled → Restoring buy at original grid level", "price", snap.BuyPrice, "size", b.cfg.OrderSize, "client_order_index", clientID)
+		b.logger.Info("TP sell filled → Restoring buy at original grid level", "price", snap.BuyPrice, "size", b.cfg.OrderSize, "client_order_index", clientID, "level", snap.LevelIndex)
 		b.trackOrder(lvl, "buy", snap.BuyPrice, snap.SizeAtomic, clientID)
 		b.releaseTrackedOrder(ord.ClientOrderIndex, true)
 		return
@@ -465,12 +468,22 @@ func (b *Bot) pollAndReconcile(ctx context.Context) error {
 	b.mu.Lock()
 	wsConnected := b.wsConnected
 	pollCooldownUntil := b.pollCooldownUntil
+	nextSafetyReconcileAt := b.nextSafetyReconcileAt
 	b.mu.Unlock()
-	if wsConnected {
-		return nil
-	}
 	if !pollCooldownUntil.IsZero() && time.Now().Before(pollCooldownUntil) {
 		return nil
+	}
+	if wsConnected {
+		// The websocket is the primary fill source, but a dropped message, a brief
+		// reconnect, or a failed REST lookup must never leave a grid hole. Keep a
+		// low-frequency safety reconcile running even while connected so polling can
+		// repair whatever the socket missed.
+		if !nextSafetyReconcileAt.IsZero() && time.Now().Before(nextSafetyReconcileAt) {
+			return nil
+		}
+		b.mu.Lock()
+		b.nextSafetyReconcileAt = time.Now().Add(wsSafetyReconcileInterval)
+		b.mu.Unlock()
 	}
 	ids := b.trackedClientOrderIDs()
 	if len(ids) > 0 {
@@ -566,25 +579,6 @@ func (b *Bot) reconcileExpiredOrder(ctx context.Context, ord Order) {
 		b.logger.Error("tracked order level is outside grid", "price", snap.BuyPrice, "client_order_index", ord.ClientOrderIndex, "level", snap.LevelIndex)
 		return
 	}
-	if snap.LevelIndex >= len(b.grid) && snap.Side == "sell" {
-		lvl := GridLevel{Index: snap.LevelIndex, BuyPrice: snap.BuyPrice, TPPrice: snap.TPPrice}
-		b.logger.Info("Reduced-Only limit TP SELL expired/canceled → Replacing recovered overflow unit", "price", snap.TPPrice, "client_order_index", ord.ClientOrderIndex, "level", snap.LevelIndex)
-		placedLvl, resp, clientID, err := b.placeReduceOnlyTPSell(ctx, lvl, snap.SizeAtomic, snap.TPPrice)
-		if err != nil {
-			b.releaseTrackedOrder(ord.ClientOrderIndex, false)
-			b.logger.Error("replace expired tp failed", "price", snap.TPPrice, "error", err)
-			return
-		}
-		b.logger.Info("Re-placing Reduced-Only limit TP SELL", "price", placedLvl.TPPrice, "size", b.cfg.OrderSize, "client_order_index", clientID, "tx_hash", resp.TxHash)
-		b.trackOrder(placedLvl, "sell", placedLvl.TPPrice, snap.SizeAtomic, clientID)
-		b.releaseTrackedOrder(ord.ClientOrderIndex, true)
-		return
-	}
-	if snap.LevelIndex >= len(b.grid) {
-		b.releaseTrackedOrder(ord.ClientOrderIndex, false)
-		b.logger.Error("tracked order level is outside grid", "price", snap.BuyPrice, "client_order_index", ord.ClientOrderIndex, "level", snap.LevelIndex)
-		return
-	}
 
 	lvl := GridLevel{Index: snap.LevelIndex, BuyPrice: snap.BuyPrice, TPPrice: snap.TPPrice}
 	if snap.Side == "buy" {
@@ -650,7 +644,6 @@ func (b *Bot) reconcilePositionCoverage(ctx context.Context) error {
 			activeTPIDs[ord.ClientOrderIndex] = struct{}{}
 		}
 	}
-	b.pruneStaleTrackedTPs(activeTPIDs, inFlightTPWindow)
 	inFlightUnits := b.inFlightTPUnits(activeTPIDs, inFlightTPWindow)
 	covered := tpUnits + inFlightUnits
 	if covered >= posUnits {
@@ -711,24 +704,6 @@ func (b *Bot) inFlightTPUnits(activeTPIDs map[int64]struct{}, window time.Durati
 	return units
 }
 
-func (b *Bot) pruneStaleTrackedTPs(activeTPIDs map[int64]struct{}, window time.Duration) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	now := time.Now()
-	for id, state := range b.tracked {
-		if state.Side != "sell" {
-			continue
-		}
-		if _, ok := activeTPIDs[id]; ok {
-			continue
-		}
-		if now.Sub(state.PlacedAt) <= window {
-			continue
-		}
-		delete(b.tracked, id)
-	}
-}
-
 func (b *Bot) placeReduceOnlyTPSell(ctx context.Context, lvl GridLevel, sizeAtomic int64, fallbackPrice float64) (GridLevel, SendTxResponse, int64, error) {
 	resp, clientID, err := b.ex.PlaceLimitOrder(ctx, "sell", lvl, sizeAtomic, b.market.PriceDecimals, true)
 	if err == nil {
@@ -764,10 +739,10 @@ func (b *Bot) trackActiveOrders(activeBuys map[int]Order, activeTPs map[int][]Or
 		profitStep = 1
 	}
 	for level, ord := range activeBuys {
-		if level < 0 || level >= len(b.grid) {
+		if level < 0 {
 			continue
 		}
-		buy := parseOrderPrice(ord, b.grid[level].BuyPrice)
+		buy := parseOrderPrice(ord, b.gridLevelForIndex(level).BuyPrice)
 		lvl := GridLevel{Index: level, BuyPrice: buy, TPPrice: roundPrice(buy*profitStep, b.market.PriceDecimals)}
 		b.trackOrderIfMissing(lvl, "buy", buy, sizeAtomic, ord.ClientOrderIndex)
 	}

@@ -359,9 +359,10 @@ func TestTrackActiveOrders(t *testing.T) {
 	b.tracked[10] = &TrackedOrder{ClientOrderID: 10, Side: "buy", Price: 1, LevelIndex: 0}
 
 	activeBuys := map[int]Order{
-		0: {ClientOrderIndex: 10, Price: "99.5"},
-		1: {ClientOrderIndex: 11},
-		9: {ClientOrderIndex: 12, Price: "50"},
+		0:  {ClientOrderIndex: 10, Price: "99.5"},
+		1:  {ClientOrderIndex: 11},
+		9:  {ClientOrderIndex: 12, Price: "50"},
+		-1: {ClientOrderIndex: 13, Price: "1"},
 	}
 	activeTPs := map[int][]Order{
 		0:  {{ClientOrderIndex: 20, Price: "101.5"}},
@@ -376,8 +377,11 @@ func TestTrackActiveOrders(t *testing.T) {
 	if got := b.tracked[11]; got == nil || got.Price != 99 {
 		t.Fatalf("fallback buy price wrong: %+v", got)
 	}
-	if got := b.tracked[12]; got != nil {
-		t.Fatal("out-of-range buy level should be skipped")
+	if got := b.tracked[12]; got == nil || got.Price != 50 || got.LevelIndex != 9 {
+		t.Fatalf("active buy at an extended level should be tracked: %+v", got)
+	}
+	if got := b.tracked[13]; got != nil {
+		t.Fatalf("negative buy level should be skipped: %+v", got)
 	}
 	if got := b.tracked[20]; got == nil || got.Price != 101.5 || got.Side != "sell" {
 		t.Fatalf("active TP not tracked: %+v", got)
@@ -447,6 +451,26 @@ func TestHandleTradeLookupFailureIsNonFatal(t *testing.T) {
 	// No tracked context available path.
 	b2 := testBot(&stubExchange{ordersByErr: errors.New("rpc down")})
 	b2.handleTrade(ctx, Trade{TradeID: 10})
+}
+
+// A trade whose lookup fails must not be marked seen, so the next delivery (or
+// the polling safety net) can still process the fill instead of losing it.
+func TestOnWSUpdateRetriesTradeAfterLookupFailure(t *testing.T) {
+	sx := &stubExchange{ordersByErr: errors.New("rpc down")}
+	b := testBot(sx)
+	b.accountIndex = 7
+	trade := Trade{TradeID: 99, AskAccountID: 7}
+
+	b.onWSUpdate(AccountMarketUpdate{Trades: []Trade{trade}})
+	if _, seen := b.seenTrades[trade.TradeID]; seen {
+		t.Fatal("a trade must not be marked seen when its lookup fails")
+	}
+
+	sx.ordersByErr = nil
+	b.onWSUpdate(AccountMarketUpdate{Trades: []Trade{trade}})
+	if _, seen := b.seenTrades[trade.TradeID]; !seen {
+		t.Fatal("a trade should be marked seen once it is handled successfully")
+	}
 }
 
 func TestMinMaxHelpers(t *testing.T) {

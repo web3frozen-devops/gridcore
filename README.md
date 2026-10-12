@@ -24,7 +24,7 @@ implemented and tested here. Your job is a thin adapter:
 2. Optionally implement `gridcore.Streamer` for WebSocket account updates.
 3. Write `cmd/<dex>/main.go` that loads config and calls
    `gridcore.New(...).Run(ctx)`.
-4. Make `go test ./...` pass. The conformance suite in this module (117 tests)
+4. Make `go test ./...` pass. The conformance suite in this module (119 tests)
    is the contract. Do not copy strategy code into the adapter to make them pass.
 
 If you find yourself editing grid math, the recovery ladder, coverage
@@ -154,10 +154,15 @@ venues that use neither.
   atomic price units (post-only-safe upward ladder, not a compressed band).
 - A recovered TP restores its implied buy as `round(tp / (1 + profit/100))`.
 - A buy fill places its TP from the **tracked order price**, never the grid level.
-- A TP fill restores the buy at its **tracked** buy price.
+- A TP fill restores the buy at its **tracked** buy price — for every level,
+  including overflow recovery levels above the configured grid depth. No fill
+  ever leaves a level without its buy.
 - An expired/canceled order is re-posted at the **same tracked price**.
 - Coverage is counted in position **units** (`activeTPUnits + inFlightTPUnits`);
   multiple TPs on one level each count, so a covered position is never re-placed.
+- A low-frequency safety reconcile keeps running while the account stream is
+  connected (and immediately after every reconnect), so a dropped fill event or
+  failed REST lookup cannot leave a permanent grid hole.
 - Anti-churn windows: `inFlightTPWindow = 90s`, `coveragePlaceCooldown = 60s`.
 - Long only: a short position is a fatal error.
 - Stateless: every startup cancels all orders and rebuilds from the position.
@@ -281,7 +286,7 @@ go test -race -covermode=atomic ./...   # CI gate; coverage floor is 100%
 
 ## Tests
 
-The suite (117 tests) pins: expiry replacement, startup recovery,
+The suite (119 tests) pins: expiry replacement, startup recovery,
 post-only-safe ladders, in-flight/coverage accounting, overflow levels,
 accidental-price fallback, and TP-price selection from tracked state.
 
