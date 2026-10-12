@@ -303,7 +303,7 @@ func TestReconcilePositionCoverageEdges(t *testing.T) {
 	}
 }
 
-func TestInFlightAndPruneWindowBranches(t *testing.T) {
+func TestInFlightWindowBranches(t *testing.T) {
 	b := testBot(&stubExchange{})
 	b.tracked[1] = &TrackedOrder{ClientOrderID: 1, Side: "sell", PlacedAt: time.Now().Add(-2 * inFlightTPWindow)}
 	b.tracked[2] = &TrackedOrder{ClientOrderID: 2, Side: "buy", PlacedAt: time.Now()}
@@ -314,18 +314,12 @@ func TestInFlightAndPruneWindowBranches(t *testing.T) {
 	if n := b.inFlightTPUnits(active, inFlightTPWindow); n != 1 {
 		t.Fatalf("in-flight units = %d, want 1", n)
 	}
-	b.pruneStaleTrackedTPs(active, inFlightTPWindow)
-	if _, ok := b.tracked[1]; ok {
-		t.Fatal("stale TP should be pruned")
-	}
-	if _, ok := b.tracked[2]; !ok {
-		t.Fatal("buy must be kept")
-	}
-	if _, ok := b.tracked[3]; !ok {
-		t.Fatal("active TP must be kept")
-	}
-	if _, ok := b.tracked[4]; !ok {
-		t.Fatal("recent in-flight TP must be kept")
+	// Unsettled tracked orders must never be pruned: they are the only
+	// evidence that lets the poller restore the buy for a missed fill.
+	for _, id := range []int64{1, 2, 3, 4} {
+		if _, ok := b.tracked[id]; !ok {
+			t.Fatalf("tracked order %d must be kept", id)
+		}
 	}
 }
 

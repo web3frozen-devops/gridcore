@@ -425,18 +425,17 @@ func TestPollAndReconcileDoesNotDuplicateActiveTPs(t *testing.T) {
 	}
 }
 
-func TestPollAndReconcileSkipsWhenWebSocketConnected(t *testing.T) {
+func TestPollAndReconcileRunsThrottledSafetyPassWhileConnected(t *testing.T) {
 	sx := &stubExchange{
+		marketResp: MarketMeta{MarketID: 32, PriceDecimals: 2, SizeDecimals: 2, MarkPrice: "100"},
 		accountResp: AccountResponse{
 			Positions: []AccountPosition{{MarketID: 32, Sign: 1, Position: "0.10"}},
 		},
 	}
 	b := &Bot{
-		cfg:    Config{OrderSize: 0.05},
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		grid: []GridLevel{
-			{Index: 0, BuyPrice: 100, TPPrice: 101},
-		},
+		cfg:         Config{OrderSize: 0.05, GridSpacing: 1, ProfitPct: 1},
+		logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		grid:        []GridLevel{{Index: 0, BuyPrice: 100, TPPrice: 101}},
 		tracked:     make(map[int64]*TrackedOrder),
 		market:      MarketMeta{MarketID: 32, PriceDecimals: 2, SizeDecimals: 2},
 		ex:          sx,
@@ -446,8 +445,53 @@ func TestPollAndReconcileSkipsWhenWebSocketConnected(t *testing.T) {
 	if err := b.pollAndReconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if sx.accountHits != 0 || sx.activeHits != 0 || sx.ordersByHits != 0 {
-		t.Fatalf("expected no REST polling while websocket is connected, got account=%d active=%d ordersBy=%d", sx.accountHits, sx.activeHits, sx.ordersByHits)
+	if sx.accountHits == 0 {
+		t.Fatal("expected a safety reconcile while the websocket is connected")
+	}
+	accountHits := sx.accountHits
+	activeHits := sx.activeHits
+	if err := b.pollAndReconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if sx.accountHits != accountHits || sx.activeHits != activeHits {
+		t.Fatalf("expected safety reconcile to be throttled while connected, account=%d→%d active=%d→%d", accountHits, sx.accountHits, activeHits, sx.activeHits)
+	}
+}
+
+func TestPollAndReconcileRecoversMissedTPFillWhileConnected(t *testing.T) {
+	sellID := EncodeTPClientOrderID(0)
+	sx := &stubExchange{
+		marketResp: MarketMeta{MarketID: 32, PriceDecimals: 2, SizeDecimals: 2, MarkPrice: "100"},
+		accountResp: AccountResponse{
+			Positions: []AccountPosition{{MarketID: 32, Sign: 1, Position: "0.05"}},
+		},
+		ordersBy: map[int64]Order{
+			sellID: {ClientOrderIndex: sellID, MarketIndex: 32, IsAsk: true, ReduceOnly: true, Status: "filled", Price: "101"},
+		},
+	}
+	b := &Bot{
+		cfg:    Config{OrderSize: 0.05, GridSpacing: 1, ProfitPct: 1},
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		grid:   []GridLevel{{Index: 0, BuyPrice: 100, TPPrice: 101}},
+		tracked: map[int64]*TrackedOrder{
+			sellID: {ClientOrderID: sellID, Side: "sell", LevelIndex: 0, BuyPrice: 100, TPPrice: 101, SizeAtomic: 5, PlacedAt: time.Now()},
+		},
+		market:      MarketMeta{MarketID: 32, PriceDecimals: 2, SizeDecimals: 2},
+		ex:          sx,
+		wsConnected: true,
+	}
+
+	if err := b.pollAndReconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if countSide(sx.placed, "buy") != 1 || sx.placed[0] != "buy" {
+		t.Fatalf("expected a missed TP fill to be healed with a buy while connected, got %#v", sx.placed)
+	}
+	b.mu.Lock()
+	_, still := b.tracked[sellID]
+	b.mu.Unlock()
+	if still {
+		t.Fatal("expected the filled TP to be settled out of tracked orders")
 	}
 }
 

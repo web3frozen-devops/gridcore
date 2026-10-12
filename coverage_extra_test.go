@@ -70,14 +70,17 @@ func TestActiveTPUnits(t *testing.T) {
 	}
 }
 
-func TestReconcileFilledOrderOverflowTPReleased(t *testing.T) {
+func TestReconcileFilledOrderOverflowTPRestoresBuy(t *testing.T) {
 	sx := &stubExchange{}
 	b := testBot(sx)
 	id := EncodeTPClientOrderID(5)
 	b.tracked[id] = &TrackedOrder{ClientOrderID: id, Side: "sell", LevelIndex: 5, BuyPrice: 100, TPPrice: 101, SizeAtomic: 10}
 	b.reconcileFilledOrder(context.Background(), Order{ClientOrderIndex: id, Status: "filled", IsAsk: true})
-	if len(sx.placed) != 0 {
-		t.Fatalf("overflow TP fill must not place orders, got %#v", sx.placed)
+	if len(sx.placed) != 1 || sx.placed[0] != "buy" {
+		t.Fatalf("overflow TP fill must restore its buy, got %#v", sx.placed)
+	}
+	if got := sx.placedLevels[0]; got != 5 {
+		t.Fatalf("restored buy level = %d, want 5", got)
 	}
 	b.mu.Lock()
 	_, exists := b.tracked[id]
@@ -97,14 +100,17 @@ func TestReconcileFilledOrderNegativeLevelReleased(t *testing.T) {
 	}
 }
 
-func TestReconcileFilledOrderOverflowBuyReleased(t *testing.T) {
+func TestReconcileFilledOrderOverflowBuyPlacesTP(t *testing.T) {
 	sx := &stubExchange{}
 	b := testBot(sx)
 	id := EncodeBuyClientOrderID(5)
 	b.tracked[id] = &TrackedOrder{ClientOrderID: id, Side: "buy", LevelIndex: 5, BuyPrice: 100, TPPrice: 101, SizeAtomic: 10}
 	b.reconcileFilledOrder(context.Background(), Order{ClientOrderIndex: id, Status: "filled", IsAsk: false})
-	if len(sx.placed) != 0 {
-		t.Fatalf("overflow buy fill must not place orders, got %#v", sx.placed)
+	if len(sx.placed) != 1 || sx.placed[0] != "sell" {
+		t.Fatalf("overflow buy fill must place its TP, got %#v", sx.placed)
+	}
+	if got := sx.placedLevels[0]; got != 5 {
+		t.Fatalf("TP level = %d, want 5", got)
 	}
 }
 
@@ -156,14 +162,14 @@ func TestReconcileExpiredOrderOverflowTPReplaced(t *testing.T) {
 	}
 }
 
-func TestReconcileExpiredOrderOverflowBuyReleased(t *testing.T) {
+func TestReconcileExpiredOrderOverflowBuyReplaced(t *testing.T) {
 	sx := &stubExchange{}
 	b := testBot(sx)
 	id := EncodeBuyClientOrderID(5)
 	b.tracked[id] = &TrackedOrder{ClientOrderID: id, Side: "buy", LevelIndex: 5, BuyPrice: 100, TPPrice: 101, SizeAtomic: 10}
 	b.reconcileExpiredOrder(context.Background(), Order{ClientOrderIndex: id, Status: "expired"})
-	if len(sx.placed) != 0 {
-		t.Fatalf("overflow buy expiry must not place orders, got %#v", sx.placed)
+	if len(sx.placed) != 1 || sx.placed[0] != "buy" {
+		t.Fatalf("overflow buy expiry must be re-placed, got %#v", sx.placed)
 	}
 }
 
